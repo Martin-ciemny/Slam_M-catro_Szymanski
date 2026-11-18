@@ -146,30 +146,35 @@ class CarteVectorielle:
     def __init__(self):
         self.segments: list[Segment] = []
 
-    def extraire_segments_nuage(self, pts_monde: np.ndarray, seuil_dist: float = 0.5, min_pts: int = 4) -> list[Segment]:
-            """Clusterisation puis extraction par Douglas-Peucker."""
-            if len(pts_monde) < 2:
-                return []
-    
-            segments_extraits = []
-            cluster_actuel = [pts_monde[0]]
-    
-            for i in range(1, len(pts_monde)):
-                p_prev = pts_monde[i - 1]
-                p_curr = pts_monde[i]
-                
-                if np.linalg.norm(p_curr - p_prev) < seuil_dist:
-                    cluster_actuel.append(p_curr)
-                else:
-                    if len(cluster_actuel) >= min_pts:
-                        # On utilise l'algorithme pour épouser les murs et détecter les coins (tolérance de 10 cm)
-                        segments_extraits.extend(douglas_peucker(np.array(cluster_actuel), epsilon=0.1))
-                    cluster_actuel = [p_curr]
-    
-            if len(cluster_actuel) >= min_pts:
-                segments_extraits.extend(douglas_peucker(np.array(cluster_actuel), epsilon=0.1))
-    
-            return segments_extraits
+    def extraire_segments_nuage(self, pts_monde: np.ndarray, seuil_dist: float = 0.4, min_pts: int = 8) -> list[Segment]:
+        """Clusterisation, extraction par Douglas-Peucker et filtrage des petits obstacles."""
+        if len(pts_monde) < 2:
+            return []
+
+        segments_extraits = []
+        cluster_actuel = [pts_monde[0]]
+
+        for i in range(1, len(pts_monde)):
+            p_prev = pts_monde[i - 1]
+            p_curr = pts_monde[i]
+            
+            # Regroupement si les points sont assez proches
+            if np.linalg.norm(p_curr - p_prev) < seuil_dist:
+                cluster_actuel.append(p_curr)
+            else:
+                # Si discontinuité, on traite le cluster s'il a assez de points
+                if len(cluster_actuel) >= min_pts:
+                    segs = douglas_peucker(np.array(cluster_actuel), epsilon=0.1)
+                    # FILTRE : On ignore les segments trop petits (bruit, pieds de chaises)
+                    segments_extraits.extend([s for s in segs if s.length > 0.4])
+                cluster_actuel = [p_curr]
+
+        # Traitement du dernier cluster restant en fin de boucle
+        if len(cluster_actuel) >= min_pts:
+            segs = douglas_peucker(np.array(cluster_actuel), epsilon=0.1)
+            segments_extraits.extend([s for s in segs if s.length > 0.4])
+
+        return segments_extraits
 
     def mettre_a_jour(self, scan: Scan, position_robot: tuple[float, float]):
         """Ajoute les nouveaux segments à la carte et fusionne ou découpe si besoin."""
