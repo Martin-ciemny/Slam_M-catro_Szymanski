@@ -40,7 +40,7 @@ class Segment:
         angle = math.acos(dot_product)
         return min(angle, math.pi - angle)
 
-    def est_proche(self, autre: 'Segment', tol_dist: float = 0.2, tol_angle_deg: float = 15.0) -> bool:
+    def est_proche(self, autre: 'Segment', tol_dist: float = 0.4, tol_angle_deg: float = 20.0) -> bool:
         """Détermine si deux segments sont proches angulairement et spatialement."""
         if math.degrees(self.angle_avec(autre)) > tol_angle_deg:
             return False
@@ -112,7 +112,7 @@ class CarteVectorielle:
     def __init__(self):
         self.segments: list[Segment] = []
 
-    def extraire_segments_nuage(self, pts_monde: np.ndarray, seuil_dist: float = 0.1, min_pts: int = 4) -> list[Segment]:
+    def extraire_segments_nuage(self, pts_monde: np.ndarray, seuil_dist: float = 0.3, min_pts: int = 5) -> list[Segment]:
         """Clusterisation : regroupe les points proches et crée un segment par cluster."""
         if len(pts_monde) < 2:
             return []
