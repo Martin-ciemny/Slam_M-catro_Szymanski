@@ -108,35 +108,68 @@ class Segment:
 # =====================================================================
 # PARTIE 5 : CONSTRUCTION DE LA CARTE VECTORIELLE
 # =====================================================================
+def douglas_peucker(points: np.ndarray, epsilon: float) -> list[Segment]:
+    """Algorithme de Douglas-Peucker (Split-and-Merge) pour extraire des segments d'une courbe."""
+    if len(points) < 2:
+        return []
+    
+    p1 = points[0]
+    p2 = points[-1]
+    
+    # Trouver le point le plus éloigné du segment [p1, p2]
+    dmax = 0.0
+    index = 0
+    
+    v = p2 - p1
+    len_v = np.linalg.norm(v)
+    if len_v == 0:
+        return []
+        
+    n = np.array([-v[1], v[0]]) / len_v  # Vecteur normal unitaire
+    
+    for i in range(1, len(points) - 1):
+        d = abs(np.dot(points[i] - p1, n))
+        if d > dmax:
+            index = i
+            dmax = d
+            
+    # Si la distance maximale dépasse la tolérance, on coupe le cluster en deux au niveau de l'angle
+    if dmax > epsilon:
+        res1 = douglas_peucker(points[:index+1], epsilon)
+        res2 = douglas_peucker(points[index:], epsilon)
+        return res1 + res2
+    else:
+        return [Segment(p1, p2)]
+
+
 class CarteVectorielle:
     def __init__(self):
         self.segments: list[Segment] = []
 
-    def extraire_segments_nuage(self, pts_monde: np.ndarray, seuil_dist: float = 0.3, min_pts: int = 5) -> list[Segment]:
-        """Clusterisation : regroupe les points proches et crée un segment par cluster."""
-        if len(pts_monde) < 2:
-            return []
-
-        segments_extraits = []
-        cluster_actuel = [pts_monde[0]]
-
-        for i in range(1, len(pts_monde)):
-            p_prev = pts_monde[i - 1]
-            p_curr = pts_monde[i]
-            
-            # Si le point est proche du précédent, il fait partie du même objet (mur)
-            if np.linalg.norm(p_curr - p_prev) < seuil_dist:
-                cluster_actuel.append(p_curr)
-            else:
-                if len(cluster_actuel) >= min_pts:
-                    # Régression géométrique simple : on relie le premier et le dernier point du cluster
-                    segments_extraits.append(Segment(cluster_actuel[0], cluster_actuel[-1]))
-                cluster_actuel = [p_curr]
-
-        if len(cluster_actuel) >= min_pts:
-            segments_extraits.append(Segment(cluster_actuel[0], cluster_actuel[-1]))
-
-        return segments_extraits
+    def extraire_segments_nuage(self, pts_monde: np.ndarray, seuil_dist: float = 0.5, min_pts: int = 4) -> list[Segment]:
+            """Clusterisation puis extraction par Douglas-Peucker."""
+            if len(pts_monde) < 2:
+                return []
+    
+            segments_extraits = []
+            cluster_actuel = [pts_monde[0]]
+    
+            for i in range(1, len(pts_monde)):
+                p_prev = pts_monde[i - 1]
+                p_curr = pts_monde[i]
+                
+                if np.linalg.norm(p_curr - p_prev) < seuil_dist:
+                    cluster_actuel.append(p_curr)
+                else:
+                    if len(cluster_actuel) >= min_pts:
+                        # On utilise l'algorithme pour épouser les murs et détecter les coins (tolérance de 10 cm)
+                        segments_extraits.extend(douglas_peucker(np.array(cluster_actuel), epsilon=0.1))
+                    cluster_actuel = [p_curr]
+    
+            if len(cluster_actuel) >= min_pts:
+                segments_extraits.extend(douglas_peucker(np.array(cluster_actuel), epsilon=0.1))
+    
+            return segments_extraits
 
     def mettre_a_jour(self, scan: Scan, position_robot: tuple[float, float]):
         """Ajoute les nouveaux segments à la carte et fusionne ou découpe si besoin."""
@@ -157,20 +190,20 @@ class CarteVectorielle:
 
         # Vérification des absences (Ray-tracing)
         # On trace des segments entre le robot et les points d'impact
-        rayons = [Segment(pos_robot_arr, p) for p in scan.points_world()]
-        segments_nettoyes = []
+        #rayons = [Segment(pos_robot_arr, p) for p in scan.points_world()]
+        #segments_nettoyes = []
         
-        for seg in self.segments:
-            seg_courant = seg
+        #for seg in self.segments:
+            #seg_courant = seg
             # On vérifie si un rayon du lidar "traverse" un segment existant (porte ouverte)
-            for rayon in rayons[::5]: # [::5] pour ne pas tester tous les rayons (optimisation)
-                seg_courant = seg_courant.decouper(rayon)
+            #for rayon in rayons[::5]: # [::5] pour ne pas tester tous les rayons (optimisation)
+            #    seg_courant = seg_courant.decouper(rayon)
             
             # On garde le segment seulement s'il est encore assez grand
-            if seg_courant.length > 0.1: 
-                segments_nettoyes.append(seg_courant)
+            #if seg_courant.length > 0.1: 
+             #   segments_nettoyes.append(seg_courant)
                 
-        self.segments = segments_nettoyes
+        #self.segments = segments_nettoyes
 
 
 # =====================================================================
