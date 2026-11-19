@@ -168,6 +168,62 @@ def creer_carte_depuis_scan(
     return mettre_a_jour_carte(carte, scan)
 
 
+
+
+def evaluer_score(carte: GridMap, scan: Scan, x: float, y: float, theta_deg: float) -> int:
+    """Calcule le score de corrélation d'une pose en sommant l'occupation des cellules touchées."""
+    score = 0
+    th_rad = np.deg2rad(theta_deg)
+    cos_th, sin_th = np.cos(th_rad), np.sin(th_rad)
+    
+    # Points du scan dans le repère local (Lidar)
+    pts_locaux = scan.points_local()
+    
+    for px, py in pts_locaux:
+        # Transformation géométrique (rotation + translation)
+        x_monde = x + px * cos_th - py * sin_th
+        y_monde = y + px * sin_th + py * cos_th
+        
+        # Projection dans la grille
+        i, j = carte.world_to_grid(x_monde, y_monde)
+        if carte.in_bounds(i, j):
+            valeur_cellule = carte.grid[j, i]
+            # On favorise les cellules identifiées comme obstacles (> 127)
+            if valeur_cellule > GridMap.VAL_INCONNU:
+                score += int(valeur_cellule)
+    return score
+
+def localisation_brute_force(
+    carte: GridMap, 
+    scan: Scan, 
+    pose_init: tuple[float, float, float],
+    fenetre_xy: float = 0.2,   # +/- 20 cm de recherche
+    fenetre_th: float = 10.0,  # +/- 10 degrés de recherche
+    pas_xy: float = 0.05,      # Test tous les 5 cm
+    pas_th: float = 1.0        # Test tous les degrés
+) -> tuple[float, float, float]:
+    """Recherche la meilleure pose (x, y, theta) maximisant l'alignement avec la carte."""
+    x0, y0, th0 = pose_init
+    meilleur_score = -1
+    meilleure_pose = pose_init
+    
+    # Génération des variations autour de la pose initiale
+    dx_vals = np.arange(-fenetre_xy, fenetre_xy + pas_xy, pas_xy)
+    dy_vals = np.arange(-fenetre_xy, fenetre_xy + pas_xy, pas_xy)
+    dth_vals = np.arange(-fenetre_th, fenetre_th + pas_th, pas_th)
+    
+    for dx in dx_vals:
+        for dy in dy_vals:
+            for dth in dth_vals:
+                x_test, y_test, th_test = x0 + dx, y0 + dy, th0 + dth
+                score = evaluer_score(carte, scan, x_test, y_test, th_test)
+                
+                if score > meilleur_score:
+                    meilleur_score = score
+                    meilleure_pose = (x_test, y_test, th_test)
+                    
+    return meilleure_pose
+
 # ------------------------------------------------------------------ Affichage
 def afficher_carte(carte: GridMap, scans: list[Scan], chemin_image: Path | None = None):
     """Affiche la carte d'occupation probabiliste et la trajectoire/poses des scans."""
@@ -233,52 +289,79 @@ def afficher_carte(carte: GridMap, scans: list[Scan], chemin_image: Path | None 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("files", nargs="*", help="fichiers CSV de scans")
-    ap.add_argument("--photos", action="store_true", help="utilise les scans de photos/ et deplacements.csv")
-    ap.add_argument("--lidar-cw", action="store_true", help="inverse les angles horaires du LD06")
-    ap.add_argument("--poses", default="poses.json", help="fichier JSON des poses recalées avec viewer.py")
-    ap.add_argument("--res", type=float, default=0.05, help="résolution d'une cellule en mètres (défaut: 0.05)")
-    ap.add_argument("--rmax", type=float, default=12.0, help="portée maximale du lidar en mètres")
-    ap.add_argument("--filter", action="store_true", help="active la décroissance temporelle et le filtrage spatial")
+    ap.add_argument("--photos", action="store_true", help="lit les CSV existants dans photos/")
+    ap.add_argument("--lidar-cw", action="store_true", help="inverse les angles horaires")
+    ap.add_argument("--poses", default="poses.json", help="fichier JSON des poses")
+    ap.add_argument("--res", type=float, default=0.05, help="résolution en m")
+    ap.add_argument("--rmax", type=float, default=12.0, help="portée max")
+    ap.add_argument("--filter", action="store_true", help="active le lissage")
     args = ap.parse_args()
 
-    # 1. Chargement des scans (compatible avec panda2.py et viewer.py)
+    # 1. Chargement des scans
     if args.photos:
         import panda2 as pm
         chemins = pm.liste_photos()
-        if not chemins:
-            ap.error(f"Aucune photo trouvée dans {pm.DOSSIER}")
         scans = [load_photo_csv(c, r_max=args.rmax) for c in chemins]
         poses = pm.calculer_poses([s.name for s in scans], pm.lire_deplacements())
         for s in scans:
-            s.set_pose(*poses[s.name])
-        out_img = pm.DOSSIER / "grid_map.png"
+            if s.name in poses:
+                s.set_pose(*poses[s.name])
+        out_img = pm.DOSSIER / "grid_map_loc.png"
     else:
-        if not args.files:
-            ap.error("Indiquez des fichiers CSV ou utilisez l'option --photos")
         paths = []
         for pattern in args.files:
             paths += sorted(glob(pattern)) or [pattern]
-        scans = [load_scan(p, lidar_cw=args.lidar_cw, r_max=args.rmax) for p in paths]
+        scans = [charger_csv_auto(p, lidar_cw=args.lidar_cw, r_max=args.rmax) for p in paths]
         apply_saved_poses(scans, args.poses)
-        out_img = Path("grid_map.png")
+        out_img = Path("grid_map_loc.png")
 
-    # 2. Calcul automatique de l'emprise globale de la grille
+    # 2. Construction de la carte
     tous_points = np.vstack([s.points_world() for s in scans] + [s.pose[:2] for s in scans])
     xmin, ymin = tous_points.min(axis=0) - 1.0
     xmax, ymax = tous_points.max(axis=0) + 1.0
 
-    # 3. Initialisation avec le 1er scan puis mises à jour successives
-    carte = creer_carte_depuis_scan(
-        scans[0], resolution=args.res, limites=(xmin, xmax, ymin, ymax)
-    )
+    carte = creer_carte_depuis_scan(scans[0], resolution=args.res, limites=(xmin, xmax, ymin, ymax))
     for s in scans[1:]:
         mettre_a_jour_carte(carte, s, decroissance=args.filter)
-
     if args.filter:
         carte.filtrer_artefacts_isoles()
 
-    afficher_carte(carte, scans, out_img)
+    # 3. PROTOCOLE DE TEST DE LOCALISATION
+    print("\n--- ÉVALUATION DE LA LOCALISATION BRUTE FORCE ---")
+    scan_test = scans[6] if len(scans) > 1 else scans[0]
+    vraie_pose = scan_test.pose.copy()
+    
+    erreur_x, erreur_y, erreur_th = 0.15, 0.10, 12.0
+    pose_bruitee = (vraie_pose[0] + erreur_x, vraie_pose[1] + erreur_y, vraie_pose[2] + erreur_th)
+    
+    print(f"Vérité terrain : x={vraie_pose[0]:.3f}m, y={vraie_pose[1]:.3f}m, th={vraie_pose[2]:.1f}°")
+    print(f"Pose bruitée (départ algo) : x={pose_bruitee[0]:.3f}m, y={pose_bruitee[1]:.3f}m, th={pose_bruitee[2]:.1f}°")
+    
+    import time
+    t0 = time.time()
+    pose_calculee = localisation_brute_force(
+        carte, scan_test, pose_init=pose_bruitee, 
+        fenetre_xy=0.20, fenetre_th=15.0, pas_xy=0.05, pas_th=1.0
+    )
+    t1 = time.time()
+    
+    erreur_finale_position = np.hypot(pose_calculee[0] - vraie_pose[0], pose_calculee[1] - vraie_pose[1])
+    diff_th = (pose_calculee[2] - vraie_pose[2]) % 360
+    erreur_finale_angle = min(diff_th, 360 - diff_th)
+    
+    print("\n--- RÉSULTATS ---")
+    print(f"Pose calculée : x={pose_calculee[0]:.3f}m, y={pose_calculee[1]:.3f}m, th={pose_calculee[2]:.1f}°")
+    print(f"Erreur de position : {erreur_finale_position*100:.1f} cm")
+    print(f"Erreur angulaire : {erreur_finale_angle:.1f} °")
+    print(f"Temps de calcul : {t1 - t0:.3f} secondes\n")
 
+    # Ajout du marqueur visuel pour voir le résultat sur la carte
+    scan_resultat = Scan(name="Pose_Trouvée", angle_deg=np.array([]), r_m=np.array([]))
+    scan_resultat.set_pose(*pose_calculee)
+    scans.append(scan_resultat)
+
+    # 4. Affichage
+    afficher_carte(carte, scans, out_img)
 
 if __name__ == "__main__":
     main()
