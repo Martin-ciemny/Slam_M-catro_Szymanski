@@ -217,14 +217,14 @@ def main():
             s.pose_init = s.pose.copy()
         for s in scans:
             print(f"{s.name}: {len(s.r_m)} points, pose = {s.pose}")
-        viewer = Viewer(scans, mode_photos=True)  # à garder : matplotlib ne retient le clavier que par référence faible
+        viewer = Viewer(scans, mode_photos=True)
         plt.show()
         return
     if not args.files:
         ap.error("indiquer des fichiers CSV, ou utiliser --photos")
 
     paths = []
-    for pattern in args.files:          # PowerShell/cmd n'expandent pas les jokers
+    for pattern in args.files:
         paths += sorted(glob(pattern)) or [pattern]
 
     scans = [load_scan(p, lidar_cw=args.lidar_cw, r_max=args.rmax) for p in paths]
@@ -232,7 +232,7 @@ def main():
     for s in scans:
         print(f"{s.name}: {len(s.r_m)} points, pose = {s.pose}")
 
-    viewer = Viewer(scans, args.poses)  # à garder : matplotlib ne retient le clavier que par référence faible
+    viewer = Viewer(scans, args.poses)
     plt.show()
 
 

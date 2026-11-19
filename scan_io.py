@@ -115,3 +115,21 @@ def load_photo_csv(path, r_min=0.02, r_max=12.0) -> Scan:
     a, r = np.array(angles), np.array(dists)
     keep = (r >= r_min) & (r <= r_max)
     return Scan(path.stem, a[keep], r[keep])
+
+
+def premier_tour(scan: Scan, tour=360.0) -> Scan:
+    """Ne garde que le premier tour de lidar d'un scan.
+
+    Certaines captures contiennent plusieurs tours (1,2 à 2,5 tours selon la photo) : les murs y seraient
+    comptés plusieurs fois. Le sens de rotation est déduit des données (angle croissant ou décroissant).
+    """
+    if len(scan.angle_deg) < 3:
+        return scan
+    d = (scan.angle_deg[1:] - scan.angle_deg[:-1] + 180.0) % 360.0 - 180.0   # pas signé entre points voisins
+    d = d * (1.0 if np.median(d) >= 0 else -1.0)
+    d = np.where((d > 0) & (d < 20.0), d, 0.0)                                # on ignore trous et retours en arrière
+    cumul = np.concatenate(([0.0], np.cumsum(d)))
+    n = int(np.searchsorted(cumul, tour, side="left"))                        # premier indice qui boucle le tour
+    if n >= len(cumul):
+        return scan
+    return Scan(scan.name, scan.angle_deg[:n], scan.r_m[:n], scan.pose.copy(), scan.pose_init.copy(), scan.visible)
