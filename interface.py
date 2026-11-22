@@ -80,12 +80,24 @@ def action_vector_map():
     lancer_commande("vector_map.py", ["--photos"], "Construction de la Carte Vectorielle...")
 
 
+def action_slam_continu():
+    """Bouton 5 : Lance le SLAM en continu."""
+    # Avec le robot branché, on lance "slam_continu.py"
+    lancer_commande("slam_continu.py", [], "Lancement du SLAM continu (simulation)...")
+
+
+def action_simu_slam():
+    """Bouton 6 : Lance le SLAM en simulation."""
+    # Sans robot, on lance la simulation.
+    lancer_commande("simu_slam.py", [], "Lancement du SLAM continu (simulation)...")
+
+
 # =====================================================================
 # CONSTRUCTION DE LA FENÊTRE GRAPHIQUE (TKINTER)
 # =====================================================================
 fenetre = tk.Tk()
 fenetre.title("Centre de Contrôle Lidar")
-fenetre.geometry("420x420")
+fenetre.geometry("420x500")
 fenetre.configure(bg="#2b2b2b")
 fenetre.resizable(False, False)
 
@@ -112,7 +124,7 @@ style_bouton = {
     "cursor": "hand2"
 }
 
-# Création des 4 boutons principaux
+# Création des 5 boutons principaux
 btn_capture = tk.Button(
     fenetre, text="📸 1. Capturer un scan (Lidar)", 
     bg="#fd971f", fg="#1e1e1e", command=action_capturer, **style_bouton
@@ -136,6 +148,18 @@ btn_vector = tk.Button(
     bg="#ae81ff", fg="#1e1e1e", command=action_vector_map, **style_bouton
 )
 btn_vector.pack(pady=6)
+
+btn_slam = tk.Button(
+    fenetre, text=" 5. Lancer le slam continu", 
+    bg="#ff00d9", fg="#1e1e1e", command=action_slam_continu, **style_bouton
+)
+btn_slam.pack(pady=6)
+
+btn_simu = tk.Button(
+    fenetre, text=" 6. Lancer la simulation", 
+    bg="#ffff00", fg="#1e1e1e", command=action_simu_slam, **style_bouton
+)
+btn_simu.pack(pady=6)
 
 # Bouton Quitter en bas
 btn_quitter = tk.Button(
